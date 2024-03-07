@@ -1,1 +1,1 @@
-# Shadow UMAP
+# Ghost UMAP

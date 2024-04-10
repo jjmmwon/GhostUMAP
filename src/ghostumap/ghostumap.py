@@ -40,6 +40,7 @@ from pynndescent.distances import named_distances as pynn_named_distances
 from pynndescent.sparse import sparse_named_distances as pynn_sparse_named_distances
 
 from ghostumap.layouts import optimize_layout_euclidean
+from ghostumap.utils import calculate_variances
 
 
 def simplicial_set_embedding(
@@ -877,3 +878,14 @@ class GhostUMAP(UMAP):
             self.ghost_embeddings,
             self.ghost_indices,
         )
+
+    def detect_anomalies(self, metric="absolute"):
+        rank, score = calculate_variances(
+            self.original_embeddings,
+            self.ghost_embeddings,
+            self.ghost_indices,
+            knn_indices=self.knn_indices if self.knn_indices is not None else None,
+            metric=metric,
+        )
+
+        return rank, score

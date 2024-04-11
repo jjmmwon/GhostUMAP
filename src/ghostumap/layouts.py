@@ -5,6 +5,8 @@ import numba
 from umap.utils import tau_rand_int
 from tqdm.auto import tqdm
 
+from ghostumap.utils import calculate_variances
+
 
 @numba.njit()
 def clip(val):
@@ -227,6 +229,7 @@ def _optimize_ghost_layout_euclidean_single_epoch(
 def optimize_layout_euclidean(
     n_embeddings,
     n_ghosts,
+    halving_points,
     original_embeddings,
     head,
     tail,
@@ -357,26 +360,27 @@ def optimize_layout_euclidean(
     )  # shape (n_embeddings, n_vertices, n_ghosts_per_target, n_components)
 
     has_ghost = np.array([True for _ in range(n_vertices)])
+    indices = np.arange(n_vertices)
 
-    halving_point = [100, 150]
+    if halving_points is None:
+        halving_points = []
 
     start_time = time.time()
     for n in tqdm(range(n_epochs), **tqdm_kwds):
-        # if n in halving_point and not n_ghosts_per_target == 0:
-        #     # calculate the ranks of the ghosts
-        #     # original_embeddings: (n_embeddings, n_samples, n_components)
-        #     ranks, scores = calculate_variances(
-        #         original_embeddings,
-        #         ghost_embeddings,
-        #         has_ghost,
-        #     )
+        if n in halving_points and not n_ghosts_per_target == 0:
+            # calculate the ranks of the ghosts
+            # original_embeddings: (n_embeddings, n_samples, n_components)
+            ranks, scores = calculate_variances(
+                original_embeddings,
+                ghost_embeddings,
+                indices[has_ghost],
+            )
 
-        #     # extract the normal ghosts
-        #     normal_ghosts = ranks[len(ranks) // 2 :]
-        #     normal_ghosts = np.array(range(n_vertices))[has_ghost][normal_ghosts]
+            # extract the normal ghosts
+            normal_ghosts = ranks[len(ranks) // 2 :]
 
-        #     # update the ghost existence
-        #     has_ghost[normal_ghosts] = False
+            # update the ghost existence
+            has_ghost[normal_ghosts] = False
 
         for i in range(n_embeddings):
             optimize_ghost_fn(

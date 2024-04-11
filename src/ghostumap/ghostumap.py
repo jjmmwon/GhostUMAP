@@ -1,4 +1,5 @@
 import time
+from typing import List
 from warnings import warn
 import joblib
 from sklearn.decomposition import PCA, TruncatedSVD
@@ -47,6 +48,7 @@ def simplicial_set_embedding(
     data,
     n_embeddings,
     n_ghosts,
+    halving_points,
     graph,
     n_components,
     initial_alpha,
@@ -281,6 +283,7 @@ def simplicial_set_embedding(
         optimize_layout_euclidean(
             n_embeddings,
             n_ghosts,
+            halving_points,
             original_embeddings,
             head,
             tail,
@@ -307,7 +310,9 @@ class GhostUMAP(UMAP):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def _fit_embed_data(self, X, n_embeddings, n_ghosts, n_epochs, init, random_state):
+    def _fit_embed_data(
+        self, X, n_embeddings, n_ghosts, n_epochs, init, random_state, halving_points
+    ):
         """A method wrapper for simplicial_set_embedding_with_ghost that can be
         replaced by subclasses.
         """
@@ -315,6 +320,7 @@ class GhostUMAP(UMAP):
             X,
             n_embeddings,
             n_ghosts,
+            halving_points,
             self.graph_,
             self.n_components,
             self._initial_alpha,
@@ -332,7 +338,15 @@ class GhostUMAP(UMAP):
             tqdm_kwds=self.tqdm_kwds,
         )
 
-    def fit(self, X, y=None, force_all_finite=True, n_embeddings=1, n_ghosts=16):
+    def fit(
+        self,
+        X,
+        y=None,
+        force_all_finite=True,
+        n_embeddings=1,
+        n_ghosts=16,
+        halving_points=None,
+    ):
         """Fit X into an embedded space.
 
         Optionally use y for supervised dimension reduction.
@@ -818,7 +832,8 @@ class GhostUMAP(UMAP):
                 n_ghosts,
                 epochs,
                 init,
-                random_state,  # JH why raw data?
+                random_state,
+                halving_points,
             )
             if self.n_epochs_list is not None:
                 if "embedding_list" not in aux_data:
@@ -856,7 +871,13 @@ class GhostUMAP(UMAP):
         return self
 
     def fit_transform(
-        self, X, y=None, force_all_finite=True, n_embeddings=1, n_ghosts=16
+        self,
+        X,
+        y=None,
+        force_all_finite=True,
+        n_embeddings=1,
+        n_ghosts=16,
+        halving_points: List[int] = None,
     ):
         start_time = time.time()
 
@@ -865,7 +886,7 @@ class GhostUMAP(UMAP):
 
         self.n_embeddings, self.n_ghosts = n_embeddings, n_ghosts
 
-        self.fit(X, y, force_all_finite, n_embeddings, n_ghosts)
+        self.fit(X, y, force_all_finite, n_embeddings, n_ghosts, halving_points)
         end_time = time.time()
 
         self.time_dict = {
@@ -879,13 +900,11 @@ class GhostUMAP(UMAP):
             self.ghost_indices,
         )
 
-    def detect_anomalies(self, metric="absolute"):
+    def detect_anomalies(self):
         rank, score = calculate_variances(
             self.original_embeddings,
             self.ghost_embeddings,
             self.ghost_indices,
-            knn_indices=self.knn_indices if self.knn_indices is not None else None,
-            metric=metric,
         )
 
         return rank, score

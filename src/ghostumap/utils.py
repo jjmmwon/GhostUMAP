@@ -16,7 +16,8 @@ def calculate_variances(
 
     rank = np.argsort(V)[::-1]
     score = V[rank]
-    rank = ghost_indices[rank]
+    if ghost_indices is not None:
+        rank = ghost_indices[rank]
 
     return rank, score
 

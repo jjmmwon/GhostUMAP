@@ -7,12 +7,10 @@ def calculate_variances(
     ghost_indices: np.ndarray = None,
 ):
 
-    WV = within_embedding_variance(original_embeddings, ghost_embeddings, ghost_indices)
-    BV = between_embedding_variance(
-        original_embeddings, ghost_embeddings, ghost_indices
-    )
+    W = within_embedding_variance(original_embeddings, ghost_embeddings, ghost_indices)
+    B = between_embedding_variance(original_embeddings, ghost_embeddings, ghost_indices)
 
-    V = WV + BV
+    V = W + B
 
     rank = np.argsort(V)[::-1]
     score = V[rank]

@@ -54,12 +54,12 @@ def within_embedding_variance(
         E = np.concatenate([E, ghost_embeddings], axis=2)
     # shape of E: (n_embeddings, n_samples, n_ghosts+1, n_components)
 
-    M = np.mean(E, axis=2)  # shape of M: (n_embeddings, n_samples, n_components)
+    Mu = np.mean(E, axis=2)  # shape of M: (n_embeddings, n_samples, n_components)
 
-    WV = np.linalg.norm(E - M[:, :, np.newaxis], axis=3)
-    WV = np.mean(WV, axis=(2, 0))
+    W = np.sum(np.square(E - Mu[:, :, np.newaxis]), axis=1)
+    W = np.mean(W, axis=(2, 0))
 
-    return WV
+    return W
 
 
 def between_embedding_variance(
@@ -92,11 +92,11 @@ def between_embedding_variance(
         E = np.concatenate([E, ghost_embeddings], axis=2)
     # shape of E: (n_embeddings, n_samples, n_ghosts+1, n_components)
 
-    M = np.mean(E, axis=2)  # shape of M: (n_embeddings, n_samples, n_components)
+    Mu = np.mean(E, axis=2)  # shape of M: (n_embeddings, n_samples, n_components)
 
-    MM = np.mean(M, axis=0)  # shape of MM: (n_samples, n_components)
+    Eta = np.mean(Mu, axis=0)  # shape of MM: (n_samples, n_components)
 
-    BV = np.linalg.norm(M - MM[np.newaxis, :], axis=2)
-    BV = np.mean(BV, axis=0)
+    B = np.sum(np.square(Mu - Eta[np.newaxis, :]), axis=2)
+    B = np.mean(B, axis=0)
 
-    return BV
+    return B

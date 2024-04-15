@@ -11,7 +11,11 @@ def calculate_variances(
     B = between_embedding_variance(original_embeddings, ghost_embeddings, ghost_indices)
 
     V = W + B
-
+    # if not ghost_embeddings is None:
+    #     print(np.mean(W), np.mean(B))
+    #     print("max, argmax", np.max(W), np.argmax(W))
+    #     w = np.argmax(W)
+    #     print(original_embeddings[0][w], ghost_embeddings[0][w])
     rank = np.argsort(V)[::-1]
     score = V[rank]
     if ghost_indices is not None:

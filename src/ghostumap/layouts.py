@@ -231,7 +231,6 @@ def optimize_layout_euclidean(
     n_ghosts,
     halving_points,
     original_embeddings,
-    ghost_embeddings,
     head,
     tail,
     n_epochs,
@@ -348,6 +347,23 @@ def optimize_layout_euclidean(
 
     n_ghosts_per_target = n_ghosts - 1
 
+    ghost_embeddings = np.array(
+        [
+            np.array(
+                [
+                    # np.random.uniform(-10, 10, (n_ghosts_per_target, 2))
+                    np.tile(original_embeddings[i][j], (n_ghosts_per_target, 1))
+                    + np.random.uniform(-0.000001, 0.000001, (n_ghosts_per_target, 2))
+                    for j in range(n_vertices)
+                ]
+            )
+            for i in range(n_embeddings)
+        ],
+        dtype=np.float32,
+    )  # shape (n_embeddings, n_vertices, n_ghosts_per_target, n_components)
+
+    # print(original_embeddings[0][:3])
+    # print(ghost_embeddings[0][:3])
     has_ghost = np.array([True for _ in range(n_vertices)])
     indices = np.arange(n_vertices)
 
@@ -371,10 +387,19 @@ def optimize_layout_euclidean(
             # update the ghost existence
             has_ghost[normal_ghosts] = False
 
+            # print("after halving")
+            # print(epoch_of_next_sample[:3])
+            # print(original_embeddings[0][:3])
+            # print(ghost_embeddings[0][:3])
+
         for i in range(n_embeddings):
+
+            # print("X", ghost_embeddings[0][:3])
             optimize_ghost_fn(
-                ghost_embeddings[i].astype(np.float32, order="C", copy=False),
-                original_embeddings[i].astype(np.float32, order="C", copy=False),
+                ghost_embeddings[i],  # .astype(np.float32, order="C", copy=False),
+                original_embeddings[i].astype(
+                    np.float32
+                ),  # .astype(np.float32, order="C", copy=False),
                 head,
                 tail,
                 has_ghost,
@@ -392,6 +417,7 @@ def optimize_layout_euclidean(
                 epoch_of_next_sample,
                 n,
             )
+            # print("Y", ghost_embeddings[0][:3])
 
             optimize_real_fn(
                 original_embeddings[i],
@@ -428,4 +454,5 @@ def optimize_layout_euclidean(
     end_time = time.time()
     time_cost = end_time - start_time
     ghost_indices = np.array(range(n_vertices))[has_ghost]
+
     return (original_embeddings, ghost_embeddings, ghost_indices, time_cost)

@@ -54,7 +54,7 @@ def within_embedding_variance(
 
     Mu = np.mean(E, axis=2)  # shape of M: (n_embeddings, n_samples, n_components)
 
-    W = np.sum(np.square(E - Mu[:, :, np.newaxis]), axis=1)
+    W = np.sum(np.square(E - Mu[:, :, np.newaxis]), axis=3)
     W = np.mean(W, axis=(2, 0))
 
     return W

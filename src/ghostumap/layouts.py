@@ -231,6 +231,7 @@ def optimize_layout_euclidean(
     n_ghosts,
     halving_points,
     original_embeddings,
+    ghost_embeddings,
     head,
     tail,
     n_epochs,
@@ -346,18 +347,6 @@ def optimize_layout_euclidean(
         tqdm_kwds["disable"] = not verbose
 
     n_ghosts_per_target = n_ghosts - 1
-
-    ghost_embeddings = np.array(
-        [
-            np.array(
-                [
-                    np.tile(original_embeddings[i][j], (n_ghosts_per_target, 1))
-                    for j in range(n_vertices)
-                ]
-            )
-            for i in range(n_embeddings)
-        ]
-    )  # shape (n_embeddings, n_vertices, n_ghosts_per_target, n_components)
 
     has_ghost = np.array([True for _ in range(n_vertices)])
     indices = np.arange(n_vertices)

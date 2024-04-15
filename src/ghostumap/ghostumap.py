@@ -195,26 +195,17 @@ def simplicial_set_embedding(
     graph.eliminate_zeros()
 
     if isinstance(init, str) and init == "random":
-        original_embeddings = np.array(
-            [
-                random_state.uniform(
-                    low=-10.0, high=10.0, size=(graph.shape[0], n_components)
-                ).astype(np.float32)
-                for _ in range(n_embeddings)
-            ]
-        )
+        embedding = random_state.uniform(
+            low=-10.0, high=10.0, size=(graph.shape[0], n_components)
+        ).astype(np.float32)
+
     elif isinstance(init, str) and init == "pca":
         if scipy.sparse.issparse(data):
             pca = TruncatedSVD(n_components=n_components, random_state=random_state)
         else:
             pca = PCA(n_components=n_components, random_state=random_state)
         embedding = pca.fit_transform(data).astype(np.float32)
-        original_embeddings = np.array(
-            [
-                noisy_scale_coords(embedding, random_state, max_coord=10, noise=0.0001)
-                for _ in range(n_embeddings)
-            ]
-        )
+
     elif isinstance(init, str) and init == "spectral":
         embedding = spectral_layout(
             data,
@@ -223,13 +214,6 @@ def simplicial_set_embedding(
             random_state,
             metric=metric,
             metric_kwds=metric_kwds,
-        )
-        # We add a little noise to avoid local minima for optimization to come
-        original_embeddings = np.array(
-            [
-                noisy_scale_coords(embedding, random_state, max_coord=10, noise=0.0001)
-                for _ in range(n_embeddings)
-            ]
         )
 
     elif isinstance(init, str) and init == "tswspectral":
@@ -241,12 +225,7 @@ def simplicial_set_embedding(
             metric=metric,
             metric_kwds=metric_kwds,
         )
-        original_embeddings = np.array(
-            [
-                noisy_scale_coords(embedding, random_state, max_coord=10, noise=0.0001)
-                for _ in range(n_embeddings)
-            ]
-        )
+
     else:
         init_data = np.array(init)
         if len(init_data.shape) == 2:
@@ -259,9 +238,30 @@ def simplicial_set_embedding(
                 ).astype(np.float32)
             else:
                 embedding = init_data
-        original_embeddings = np.array(
-            [np.copy(embedding) for _ in range(n_embeddings)]
+
+    original_embeddings = np.array(
+        [
+            noisy_scale_coords(embedding, random_state, max_coord=10, noise=0.0001)
+            for _ in range(n_embeddings)
+        ]
+    )
+
+    # shape (n_embeddings, n_vertices, n_ghosts_per_target, n_components)
+    ghost_embeddings = None 
+    for i in range(n_embeddings):
+        ghost_embedding = np.array(
+            [
+                noisy_scale_coords(embedding, random_state, max_coord=10, noise=0.0001)
+                for _ in range(n_ghosts - 1)
+            ]
         )
+        ghost_embedding = np.swapaxes(ghost_embedding, 0, 1)
+        if i == 0:
+            ghost_embeddings = ghost_embedding[np.newaxis, :]
+        else:
+            ghost_embeddings = np.concatenate(
+                [ghost_embeddings, ghost_embedding[np.newaxis, :]], axis=0
+            )
 
     epochs_per_sample = make_epochs_per_sample(graph.data, n_epochs_max)
 
@@ -285,6 +285,7 @@ def simplicial_set_embedding(
             n_ghosts,
             halving_points,
             original_embeddings,
+            ghost_embeddings,
             head,
             tail,
             n_epochs,

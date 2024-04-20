@@ -1,11 +1,14 @@
 import time
+from matplotlib import pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 import numba
 
+import pandas as pd
 from umap.utils import tau_rand_int
 from tqdm.auto import tqdm
 
-from ghostumap.utils import calculate_variances
+from ghostumap.utils import detect_instable_ghosts
 
 
 @numba.njit()
@@ -147,7 +150,7 @@ def _optimize_ghost_layout_euclidean_single_epoch(
     head,
     tail,
     has_ghost,
-    n_ghosts_per_target,
+    n_ghosts,
     n_vertices,
     epochs_per_sample,
     a,
@@ -160,6 +163,7 @@ def _optimize_ghost_layout_euclidean_single_epoch(
     epoch_of_next_negative_sample,
     epoch_of_next_sample,
     n,
+    benchmark=False,
 ):
     """
     ghost_embedding: array of shape (n_vertices, n_ghosts_per_target, n_components)
@@ -171,12 +175,12 @@ def _optimize_ghost_layout_euclidean_single_epoch(
     """
     # optimize ghost embedding
     for i in numba.prange(epochs_per_sample.shape[0]):
-        for g in range(n_ghosts_per_target):
+        for g in range(n_ghosts):
             if epoch_of_next_sample[i] <= n:
                 j = head[i]  # 1st node of the ith link
                 k = tail[i]  # 2nd node of the ith link, link is symmetric
 
-                if not has_ghost[j]:
+                if not benchmark and not has_ghost[j]:
                     continue
 
                 current = ghost_embeddings[j][g]
@@ -246,6 +250,7 @@ def optimize_layout_euclidean(
     verbose=False,
     tqdm_kwds=None,
     move_other=False,
+    benchmark=False,
 ):
     """Improve an embedding using stochastic gradient descent to minimize the
     fuzzy set cross entropy between the 1-skeletons of the high dimensional
@@ -345,15 +350,13 @@ def optimize_layout_euclidean(
     if "disable" not in tqdm_kwds:
         tqdm_kwds["disable"] = not verbose
 
-    n_ghosts_per_target = n_ghosts - 1
-
     ghost_embeddings = np.array(
         [
             np.array(
                 [
                     # np.random.uniform(-10, 10, (n_ghosts_per_target, 2))
-                    np.tile(original_embeddings[i][j], (n_ghosts_per_target, 1))
-                    + np.random.uniform(-0.000001, 0.000001, (n_ghosts_per_target, 2))
+                    np.tile(original_embeddings[i][j], (n_ghosts, 1))
+                    # + np.random.uniform(-1, 1, (n_ghosts, 2))
                     for j in range(n_vertices)
                 ]
             )
@@ -372,10 +375,11 @@ def optimize_layout_euclidean(
 
     start_time = time.time()
     for n in tqdm(range(n_epochs), **tqdm_kwds):
-        if n in halving_points and not n_ghosts_per_target == 0:
+        if n in halving_points and not n_ghosts == 0:
+            print(n)
             # calculate the ranks of the ghosts
             # original_embeddings: (n_embeddings, n_samples, n_components)
-            ranks, scores = calculate_variances(
+            ranks, scores = detect_instable_ghosts(
                 original_embeddings,
                 ghost_embeddings,
                 indices[has_ghost],
@@ -403,7 +407,7 @@ def optimize_layout_euclidean(
                 head,
                 tail,
                 has_ghost,
-                n_ghosts_per_target,
+                n_ghosts,
                 n_vertices,
                 epochs_per_sample,
                 a,
@@ -416,6 +420,7 @@ def optimize_layout_euclidean(
                 epoch_of_next_negative_sample,
                 epoch_of_next_sample,
                 n,
+                benchmark=benchmark,
             )
             # print("Y", ghost_embeddings[0][:3])
 

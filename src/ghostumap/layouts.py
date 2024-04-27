@@ -375,6 +375,8 @@ def optimize_layout_euclidean(
 
     start_time = time.time()
     for n in tqdm(range(n_epochs), **tqdm_kwds):
+        np.save(f"ghost_embeddings_{n}.npy", ghost_embeddings)
+        np.save(f"original_embeddings_{n}.npy", original_embeddings)
         if n in halving_points and not n_ghosts == 0:
             print(n)
             # calculate the ranks of the ghosts
@@ -452,7 +454,8 @@ def optimize_layout_euclidean(
 
         # if epochs_list is not None and n in epochs_list:
         #     embedding_list.append(head_embedding.copy())
-
+    np.save(f"ghost_embeddings_{n_epochs}.npy", ghost_embeddings)
+    np.save(f"original_embeddings_{n_epochs}.npy", original_embeddings)
     # Add the last embedding to the list as well
     # if epochs_list is not None:
     #     embedding_list.append(head_embedding.copy())

@@ -2,6 +2,7 @@ import time
 from typing import List, Literal
 from warnings import warn
 import joblib
+from matplotlib.colors import LinearSegmentedColormap
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.metrics import pairwise_distances
 from sklearn.neighbors import KDTree
@@ -1169,6 +1170,153 @@ class GhostUMAP(UMAP):
             self.ghost_embeddings,
             self.ghost_indices,
         )
+
+    def measure_knn_time(
+        self,
+        X,
+        y=None,
+        force_all_finite=True,
+    ):
+        X = check_array(
+            X,
+            dtype=np.float32,
+            accept_sparse="csr",
+            order="C",
+            force_all_finite=force_all_finite,
+        )
+        self._raw_data = X
+
+        # Handle all the optional arguments, setting default
+        if self.a is None or self.b is None:
+            self._a, self._b = find_ab_params(self.spread, self.min_dist)
+        else:
+            self._a = self.a
+            self._b = self.b
+
+        if isinstance(self.init, np.ndarray):
+            init = check_array(
+                self.init,
+                dtype=np.float32,
+                accept_sparse=False,
+                force_all_finite=force_all_finite,
+            )
+        else:
+            init = self.init
+
+        self._initial_alpha = self.learning_rate
+
+        self.knn_indices = self.precomputed_knn[0]
+        self.knn_dists = self.precomputed_knn[1]
+        # #848: allow precomputed knn to not have a search index
+        if len(self.precomputed_knn) == 2:
+            self.knn_search_index = None
+        else:
+            self.knn_search_index = self.precomputed_knn[2]
+
+        self._validate_parameters()
+
+        if self.verbose:
+            print(str(self))
+
+        self._original_n_threads = numba.get_num_threads()
+        if self.n_jobs > 0 and self.n_jobs is not None:
+            numba.set_num_threads(self.n_jobs)
+
+        # Check if we should unique the data
+        # We've already ensured that we aren't in the precomputed case
+        if self.unique:
+            # check if the matrix is dense
+            if self._sparse_data:
+                # Call a sparse unique function
+                index, inverse, counts = csr_unique(X)
+            else:
+                index, inverse, counts = np.unique(
+                    X,
+                    return_index=True,
+                    return_inverse=True,
+                    return_counts=True,
+                    axis=0,
+                )[1:4]
+            if self.verbose:
+                print(
+                    "Unique=True -> Number of data points reduced from ",
+                    X.shape[0],
+                    " to ",
+                    X[index].shape[0],
+                )
+                most_common = np.argmax(counts)
+                print(
+                    "Most common duplicate is",
+                    index[most_common],
+                    " with a count of ",
+                    counts[most_common],
+                )
+            # We'll expose an inverse map when unique=True for users to map from our internal structures to their data
+            self._unique_inverse_ = inverse
+        # If we aren't asking for unique use the full index.
+        # This will save special cases later.
+        else:
+            index = list(range(X.shape[0]))
+            inverse = list(range(X.shape[0]))
+
+        # Error check n_neighbors based on data size
+        if X[index].shape[0] <= self.n_neighbors:
+            if X[index].shape[0] == 1:
+                self.embedding_ = np.zeros(
+                    (1, self.n_components)
+                )  # needed to sklearn comparability
+                return self
+
+            warn(
+                "n_neighbors is larger than the dataset size; truncating to "
+                "X.shape[0] - 1"
+            )
+            self._n_neighbors = X[index].shape[0] - 1
+            if self.densmap:
+                self._densmap_kwds["n_neighbors"] = self._n_neighbors
+        else:
+            self._n_neighbors = self.n_neighbors
+
+        # Note: unless it causes issues for setting 'index', could move this to
+        # initial sparsity check above
+        if self._sparse_data and not X.has_sorted_indices:
+            X.sort_indices()
+
+        random_state = check_random_state(self.random_state)
+
+        if self.verbose:
+            print(ts(), "Construct fuzzy simplicial set")
+
+        # Standard case
+        self._small_data = False
+        # Standard case
+        if self._sparse_data and self.metric in pynn_sparse_named_distances:
+            nn_metric = self.metric
+        elif not self._sparse_data and self.metric in pynn_named_distances:
+            nn_metric = self.metric
+        else:
+            nn_metric = self._input_distance_func
+
+        start = time.time()
+        (
+            self._knn_indices,
+            self._knn_dists,
+            self._knn_search_index,
+        ) = nearest_neighbors(
+            X[index],
+            self._n_neighbors,
+            nn_metric,
+            self._metric_kwds,
+            self.angular_rp_forest,
+            random_state,
+            self.low_memory,
+            use_pynndescent=True,
+            n_jobs=self.n_jobs,
+            verbose=self.verbose,
+        )
+        end = time.time()
+
+        return end - start
 
     # def ghost_plot(
     #     self,

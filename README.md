@@ -43,8 +43,8 @@ Embedding of the original data points, identical to the output of UMAP. It repre
 ```G: array, shape (n_samples, n_ghosts, n_components)```
 Embedding of ghost points which are clones of the original points. These ghost points are used to evaluate the instability of each data instance.
 
-```ghost_inices: array, shape (n_remaining_ghosts,), (optional)``` 
-This array lists the indices of the remaining ghost points after the successive halving process. It is only returned if a schedule is specified.
+```ghost_inices: array, shape (n_remaining_ghosts,)``` 
+This array lists the indices of the remaining ghost points after the successive halving process.
 
 
 ### Function 'measure_instability'

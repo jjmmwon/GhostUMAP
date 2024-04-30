@@ -42,14 +42,13 @@ from pynndescent.distances import named_distances as pynn_named_distances
 from pynndescent.sparse import sparse_named_distances as pynn_sparse_named_distances
 
 from ghostumap.layouts import optimize_layout_euclidean
-from ghostumap.utils import detect_instable_ghosts
+from ghostumap.utils import measure_instability
 
 
 def simplicial_set_embedding(
     data,
-    n_embeddings,
     n_ghosts,
-    halving_points,
+    schedule,
     graph,
     n_components,
     initial_alpha,
@@ -65,7 +64,6 @@ def simplicial_set_embedding(
     parallel=False,
     verbose=False,
     tqdm_kwds=None,
-    benchmark=False,
 ):
     """Perform a fuzzy simplicial set embedding, using a specified
     initialisation method and then minimizing the fuzzy set cross entropy
@@ -197,25 +195,17 @@ def simplicial_set_embedding(
     graph.eliminate_zeros()
 
     if isinstance(init, str) and init == "random":
-        original_embeddings = np.array(
-            [
-                random_state.uniform(
-                    low=-10.0, high=10.0, size=(graph.shape[0], n_components)
-                ).astype(np.float32)
-                for _ in range(n_embeddings)
-            ]
-        )
+        original_embedding = random_state.uniform(
+            low=-10.0, high=10.0, size=(graph.shape[0], n_components)
+        ).astype(np.float32)
     elif isinstance(init, str) and init == "pca":
         if scipy.sparse.issparse(data):
             pca = TruncatedSVD(n_components=n_components, random_state=random_state)
         else:
             pca = PCA(n_components=n_components, random_state=random_state)
         embedding = pca.fit_transform(data).astype(np.float32)
-        original_embeddings = np.array(
-            [
-                noisy_scale_coords(embedding, random_state, max_coord=10, noise=0.0001)
-                for _ in range(n_embeddings)
-            ]
+        original_embedding = noisy_scale_coords(
+            embedding, random_state, max_coord=10, noise=0.0001
         )
     elif isinstance(init, str) and init == "spectral":
         embedding = spectral_layout(
@@ -227,11 +217,8 @@ def simplicial_set_embedding(
             metric_kwds=metric_kwds,
         )
         # We add a little noise to avoid local minima for optimization to come
-        original_embeddings = np.array(
-            [
-                noisy_scale_coords(embedding, random_state, max_coord=10, noise=0.0001)
-                for _ in range(n_embeddings)
-            ]
+        original_embedding = noisy_scale_coords(
+            embedding, random_state, max_coord=10, noise=0.0001
         )
 
     elif isinstance(init, str) and init == "tswspectral":
@@ -243,11 +230,8 @@ def simplicial_set_embedding(
             metric=metric,
             metric_kwds=metric_kwds,
         )
-        original_embeddings = np.array(
-            [
-                noisy_scale_coords(embedding, random_state, max_coord=10, noise=0.0001)
-                for _ in range(n_embeddings)
-            ]
+        original_embedding = noisy_scale_coords(
+            embedding, random_state, max_coord=10, noise=0.0001
         )
     else:
         init_data = np.array(init)
@@ -261,9 +245,7 @@ def simplicial_set_embedding(
                 ).astype(np.float32)
             else:
                 embedding = init_data
-        original_embeddings = np.array(
-            [np.copy(embedding) for _ in range(n_embeddings)]
-        )
+        original_embedding = embedding
 
     epochs_per_sample = make_epochs_per_sample(graph.data, n_epochs_max)
 
@@ -281,32 +263,28 @@ def simplicial_set_embedding(
         / (np.max(embedding, 0) - np.min(embedding, 0))
     ).astype(np.float32, order="C")
 
-    (original_embeddings, ghost_embeddings, ghost_indices, time_cost) = (
-        optimize_layout_euclidean(
-            n_embeddings,
-            n_ghosts,
-            halving_points,
-            original_embeddings,
-            head,
-            tail,
-            n_epochs,
-            n_vertices,
-            epochs_per_sample,
-            a,
-            b,
-            rng_state,
-            gamma,
-            initial_alpha,
-            negative_sample_rate,
-            parallel=parallel,
-            verbose=verbose,
-            tqdm_kwds=tqdm_kwds,
-            move_other=True,
-            benchmark=benchmark,
-        )
+    (original_embedding, ghost_embeddings, ghost_indices) = optimize_layout_euclidean(
+        n_ghosts,
+        schedule,
+        original_embedding,
+        head,
+        tail,
+        n_epochs,
+        n_vertices,
+        epochs_per_sample,
+        a,
+        b,
+        rng_state,
+        gamma,
+        initial_alpha,
+        negative_sample_rate,
+        parallel=parallel,
+        verbose=verbose,
+        tqdm_kwds=tqdm_kwds,
+        move_other=True,
     )
 
-    return original_embeddings, ghost_embeddings, ghost_indices, time_cost, aux_data
+    return original_embedding, ghost_embeddings, ghost_indices, aux_data
 
 
 class GhostUMAP(UMAP):
@@ -568,17 +546,14 @@ class GhostUMAP(UMAP):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def _fit_embed_data(
-        self, X, n_embeddings, n_ghosts, n_epochs, init, random_state, halving_points
-    ):
+    def _fit_embed_data(self, X, n_ghosts, n_epochs, init, random_state, schedule):
         """A method wrapper for simplicial_set_embedding_with_ghost that can be
         replaced by subclasses.
         """
         return simplicial_set_embedding(
             X,
-            n_embeddings,
             n_ghosts,
-            halving_points,
+            schedule,
             self.graph_,
             self.n_components,
             self._initial_alpha,
@@ -594,7 +569,6 @@ class GhostUMAP(UMAP):
             self.random_state is None,
             self.verbose,
             tqdm_kwds=self.tqdm_kwds,
-            benchmark=self.benchmark,
         )
 
     def fit(
@@ -602,9 +576,8 @@ class GhostUMAP(UMAP):
         X,
         y=None,
         force_all_finite=True,
-        n_embeddings=1,
         n_ghosts=16,
-        halving_points=None,
+        schedule=None,
     ):
         """Fit X into an embedded space.
 
@@ -1083,16 +1056,14 @@ class GhostUMAP(UMAP):
                 self.original_embeddings,
                 self.ghost_embeddings,
                 self.ghost_indices,
-                self.time_cost,
                 aux_data,
             ) = self._fit_embed_data(
                 self._raw_data[index],
-                n_embeddings,
                 n_ghosts,
                 epochs,
                 init,
                 random_state,
-                halving_points,
+                schedule,
             )
             if self.n_epochs_list is not None:
                 if "embedding_list" not in aux_data:
@@ -1132,31 +1103,57 @@ class GhostUMAP(UMAP):
     def fit_transform(
         self,
         X,
-        y=None,
         force_all_finite=True,
-        n_ghosts=16,
-        halving_points: List[int] = None,
-        benchmark: Literal["time", "accuracy"] = "time",
+        n_ghosts=8,
+        schedule: List[int] = None,
     ):
-        if benchmark == "accuracy":
-            self.benchmark = True
-        else:
-            self.benchmark = False
+        """
+        Fit X into an embedded space with ghosts and return that transformed outputs.
 
-        start_time = time.time()
+        Parameters
+        ----------
+        X : array, shape (n_samples, n_features) or (n_samples, n_samples)
+            If the metric is 'precomputed' X must be a square distance
+            matrix. Otherwise it contains a sample per row. If the method
+            is 'exact', X may be a sparse matrix of type 'csr', 'csc'
+            or 'coo'.
 
-        if n_ghosts < 1:
-            raise ValueError("n_embeddings and n_ghosts must be a positive integer.")
+        force_all_finite : Whether to raise an error on np.inf, np.nan, pd.NA in array.
+            The possibilities are: - True: Force all values of array to be finite.
+                                    - False: accepts np.inf, np.nan, pd.NA in array.
+                                    - 'allow-nan': accepts only np.nan and pd.NA values in array.
+                                       Values cannot be infinite.
 
-        self.n_embeddings, self.n_ghosts = 1, n_ghosts
+        n_ghosts : int (optional, default 8)
+            The number of ghost points to embed in the embedding space.
 
-        self.fit(X, y, force_all_finite, 1, n_ghosts, halving_points)
-        end_time = time.time()
+        schedule : list of int (optional, default None)
+            The schedule of epochs to successive halving.
 
-        self.time_dict = {
-            "total_time": end_time - start_time,
-            "embedding_time": self.time_cost,
-        }
+        Returns
+        -------
+        embedding : array, shape (n_samples, n_components)
+            The transformed samples in the embedded space.
+
+        ghost_embedding : array, shape (n_samples, n_ghosts, n_components)
+            The transformed ghost points in the embedded space.
+
+        ghost_indices : array, shape (n_remaining_ghosts,) (optional, default None)
+            The indices of the ghost points in the original data.
+
+        """
+        self.n_ghosts = n_ghosts
+
+        self.check_params(X, n_ghosts, schedule)
+
+        y = None
+        self.fit(X, y, force_all_finite, n_ghosts, schedule)
+
+        if schedule is None:
+            return (
+                self.original_embeddings,
+                self.ghost_embeddings,
+            )
 
         return (
             self.original_embeddings,
@@ -1164,253 +1161,23 @@ class GhostUMAP(UMAP):
             self.ghost_indices,
         )
 
-    def detect_instable_ghosts(self):
-        return detect_instable_ghosts(
+    def check_params(self, X, n_ghosts, schedule):
+        if not isinstance(n_ghosts, int):
+            raise ValueError("n_ghosts should be an integer")
+        if n_ghosts < 1:
+            raise ValueError("n_ghosts should be greater than 0")
+        if not isinstance(schedule, list):
+            raise ValueError("schedule should be a list")
+        if not all(isinstance(x, int) for x in schedule):
+            raise ValueError("schedule should be a list of integers")
+        if not all(x > 0 for x in schedule):
+            raise ValueError("schedule should be a list of positive integers")
+        if 2 ** len(schedule) > X.shape[0]:
+            raise ValueError("schedule is too long for the number of data points")
+
+    def measure_instability(self):
+        return measure_instability(
             self.original_embeddings,
             self.ghost_embeddings,
             self.ghost_indices,
         )
-
-    def measure_knn_time(
-        self,
-        X,
-        y=None,
-        force_all_finite=True,
-    ):
-        X = check_array(
-            X,
-            dtype=np.float32,
-            accept_sparse="csr",
-            order="C",
-            force_all_finite=force_all_finite,
-        )
-        self._raw_data = X
-
-        # Handle all the optional arguments, setting default
-        if self.a is None or self.b is None:
-            self._a, self._b = find_ab_params(self.spread, self.min_dist)
-        else:
-            self._a = self.a
-            self._b = self.b
-
-        if isinstance(self.init, np.ndarray):
-            init = check_array(
-                self.init,
-                dtype=np.float32,
-                accept_sparse=False,
-                force_all_finite=force_all_finite,
-            )
-        else:
-            init = self.init
-
-        self._initial_alpha = self.learning_rate
-
-        self.knn_indices = self.precomputed_knn[0]
-        self.knn_dists = self.precomputed_knn[1]
-        # #848: allow precomputed knn to not have a search index
-        if len(self.precomputed_knn) == 2:
-            self.knn_search_index = None
-        else:
-            self.knn_search_index = self.precomputed_knn[2]
-
-        self._validate_parameters()
-
-        if self.verbose:
-            print(str(self))
-
-        self._original_n_threads = numba.get_num_threads()
-        if self.n_jobs > 0 and self.n_jobs is not None:
-            numba.set_num_threads(self.n_jobs)
-
-        # Check if we should unique the data
-        # We've already ensured that we aren't in the precomputed case
-        if self.unique:
-            # check if the matrix is dense
-            if self._sparse_data:
-                # Call a sparse unique function
-                index, inverse, counts = csr_unique(X)
-            else:
-                index, inverse, counts = np.unique(
-                    X,
-                    return_index=True,
-                    return_inverse=True,
-                    return_counts=True,
-                    axis=0,
-                )[1:4]
-            if self.verbose:
-                print(
-                    "Unique=True -> Number of data points reduced from ",
-                    X.shape[0],
-                    " to ",
-                    X[index].shape[0],
-                )
-                most_common = np.argmax(counts)
-                print(
-                    "Most common duplicate is",
-                    index[most_common],
-                    " with a count of ",
-                    counts[most_common],
-                )
-            # We'll expose an inverse map when unique=True for users to map from our internal structures to their data
-            self._unique_inverse_ = inverse
-        # If we aren't asking for unique use the full index.
-        # This will save special cases later.
-        else:
-            index = list(range(X.shape[0]))
-            inverse = list(range(X.shape[0]))
-
-        # Error check n_neighbors based on data size
-        if X[index].shape[0] <= self.n_neighbors:
-            if X[index].shape[0] == 1:
-                self.embedding_ = np.zeros(
-                    (1, self.n_components)
-                )  # needed to sklearn comparability
-                return self
-
-            warn(
-                "n_neighbors is larger than the dataset size; truncating to "
-                "X.shape[0] - 1"
-            )
-            self._n_neighbors = X[index].shape[0] - 1
-            if self.densmap:
-                self._densmap_kwds["n_neighbors"] = self._n_neighbors
-        else:
-            self._n_neighbors = self.n_neighbors
-
-        # Note: unless it causes issues for setting 'index', could move this to
-        # initial sparsity check above
-        if self._sparse_data and not X.has_sorted_indices:
-            X.sort_indices()
-
-        random_state = check_random_state(self.random_state)
-
-        if self.verbose:
-            print(ts(), "Construct fuzzy simplicial set")
-
-        # Standard case
-        self._small_data = False
-        # Standard case
-        if self._sparse_data and self.metric in pynn_sparse_named_distances:
-            nn_metric = self.metric
-        elif not self._sparse_data and self.metric in pynn_named_distances:
-            nn_metric = self.metric
-        else:
-            nn_metric = self._input_distance_func
-
-        start = time.time()
-        (
-            self._knn_indices,
-            self._knn_dists,
-            self._knn_search_index,
-        ) = nearest_neighbors(
-            X[index],
-            self._n_neighbors,
-            nn_metric,
-            self._metric_kwds,
-            self.angular_rp_forest,
-            random_state,
-            self.low_memory,
-            use_pynndescent=True,
-            n_jobs=self.n_jobs,
-            verbose=self.verbose,
-        )
-        end = time.time()
-
-        return end - start
-
-    # def ghost_plot(
-    #     self,
-    #     Z,
-    #     Z_ghost,
-    #     y,
-    #     names,
-    #     colors,
-    #     s=20,
-    #     s_ghost=5,
-    #     linewidth=1,
-    #     show_legend=True,
-    # ):
-    #     tab10 = {
-    #         0: "#4E79A7",  # blue
-    #         1: "#F28E2B",  # orange
-    #         2: "#59A14F",  # green
-    #         3: "#E15759",  # red
-    #         4: "#B07AA1",  # purple
-    #         5: "#9C755F",  # brown
-    #         6: "#FF9DA7",  # pink
-    #         7: "#EDC948",  # yellow-ish
-    #         8: "#76B7B2",  # teal
-    #         9: "#BAB0AC",  # gray
-    #     }
-    #     Z = self.original_embeddings[0]
-    #     Z_ghost = self.ghost_embeddings[0]
-
-    #     n_insts = Z.shape[0]
-    #     n_attrs = Z.shape[1]
-    #     n_ghosts = Z_ghost.shape[1]
-    #     n_ghost_insts = n_insts * n_ghosts
-
-    #     Z_ghost_flatten = Z_ghost.reshape(n_ghost_insts, n_attrs)
-    #     y_ghost = y.repeat(n_ghosts)
-
-    #     source_positions = np.tile(Z, (1, n_ghosts)).reshape((n_ghost_insts, n_attrs))
-    #     target_positions = Z_ghost_flatten
-    #     line_positions = np.hstack((source_positions, target_positions)).reshape(
-    #         (n_ghost_insts, 2, n_attrs)
-    #     )
-
-    #     total_moving_dists = (
-    #         np.linalg.norm(source_positions - target_positions, axis=1)
-    #         .reshape((n_insts, n_ghosts))
-    #         .sum(axis=1)
-    #     )
-    #     total_moving_dists /= total_moving_dists.max()
-
-    #     cmap = LinearSegmentedColormap.from_list(
-    #         "", [colors[names[label]] for label in np.unique(y)]
-    #     )
-    #     plot_order = np.argsort(total_moving_dists)
-    #     plot_order_ghost = plot_order.repeat(n_ghosts) * n_ghosts
-    #     for i in range(n_ghosts):
-    #         plot_order_ghost[i::n_ghosts] += i
-
-    #     _, ax = plt.subplots(figsize=(6, 6))
-    #     line_collection = LineCollection(
-    #         line_positions,
-    #         color="#000000",
-    #         alpha=np.repeat(total_moving_dists, n_ghosts),
-    #         linewidth=linewidth,
-    #         antialiaseds=(1,),
-    #     )
-    #     line_collection.set_zorder(3)
-    #     ax.add_collection(line_collection)
-
-    #     ax.scatter(*Z[plot_order].T, c=y[plot_order], cmap=cmap, s=s)
-    #     ax.scatter(
-    #         *Z_ghost_flatten[plot_order_ghost].T,
-    #         c=y_ghost[plot_order_ghost],
-    #         cmap=cmap,
-    #         s=s_ghost,
-    #         alpha=np.repeat(total_moving_dists, n_ghosts)[plot_order_ghost],
-    #     )
-
-    #     if show_legend:
-    #         ax.legend(
-    #             handles=[
-    #                 Line2D(
-    #                     [0],
-    #                     [0],
-    #                     marker="o",
-    #                     color="w",
-    #                     markersize=7,
-    #                     label=names[label],
-    #                     markerfacecolor=colors[names[label]],
-    #                 )
-    #                 for label in np.unique(y)
-    #             ],
-    #         )
-    #     ax.set_aspect("equal")
-    #     ax.set_box_aspect(1)
-    #     ax.axis("off")
-    #     plt.tight_layout()
-    #     plt.show()

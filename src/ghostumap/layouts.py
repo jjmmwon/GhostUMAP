@@ -8,7 +8,7 @@ import pandas as pd
 from umap.utils import tau_rand_int
 from tqdm.auto import tqdm
 
-from ghostumap.utils import detect_instable_ghosts
+from ghostumap.utils import measure_instability
 
 
 @numba.njit()
@@ -83,7 +83,6 @@ def _optimize_real_layout_euclidean_single_epoch(
     epoch_of_next_negative_sample,
     epoch_of_next_sample,
     n,
-    update,
 ):
     for i in numba.prange(epochs_per_sample.shape[0]):
         if epoch_of_next_sample[i] <= n:
@@ -108,8 +107,7 @@ def _optimize_real_layout_euclidean_single_epoch(
                 if move_other:
                     other[d] += -grad_d * alpha
 
-            if update:
-                epoch_of_next_sample[i] += epochs_per_sample[i]
+            epoch_of_next_sample[i] += epochs_per_sample[i]
 
             n_neg_samples = int(
                 (n - epoch_of_next_negative_sample[i]) / epochs_per_negative_sample[i]
@@ -138,10 +136,10 @@ def _optimize_real_layout_euclidean_single_epoch(
                     else:
                         grad_d = 0
                     current[d] += grad_d * alpha
-            if update:
-                epoch_of_next_negative_sample[i] += (
-                    n_neg_samples * epochs_per_negative_sample[i]
-                )
+
+            epoch_of_next_negative_sample[i] += (
+                n_neg_samples * epochs_per_negative_sample[i]
+            )
 
 
 def _optimize_ghost_layout_euclidean_single_epoch(
@@ -163,7 +161,6 @@ def _optimize_ghost_layout_euclidean_single_epoch(
     epoch_of_next_negative_sample,
     epoch_of_next_sample,
     n,
-    benchmark=False,
 ):
     """
     ghost_embedding: array of shape (n_vertices, n_ghosts_per_target, n_components)
@@ -180,7 +177,7 @@ def _optimize_ghost_layout_euclidean_single_epoch(
                 j = head[i]  # 1st node of the ith link
                 k = tail[i]  # 2nd node of the ith link, link is symmetric
 
-                if not benchmark and not has_ghost[j]:
+                if not has_ghost[j]:
                     continue
 
                 current = ghost_embeddings[j][g]
@@ -231,10 +228,9 @@ def _optimize_ghost_layout_euclidean_single_epoch(
 
 
 def optimize_layout_euclidean(
-    n_embeddings,
     n_ghosts,
-    halving_points,
-    original_embeddings,
+    schedule,
+    original_embedding,
     head,
     tail,
     n_epochs,
@@ -250,7 +246,6 @@ def optimize_layout_euclidean(
     verbose=False,
     tqdm_kwds=None,
     move_other=False,
-    benchmark=False,
 ):
     """Improve an embedding using stochastic gradient descent to minimize the
     fuzzy set cross entropy between the 1-skeletons of the high dimensional
@@ -319,7 +314,7 @@ def optimize_layout_euclidean(
         The optimized embedding.
     """
 
-    dim = original_embeddings.shape[2]
+    dim = original_embedding.shape[1]
     alpha = initial_alpha
 
     epochs_per_negative_sample = epochs_per_sample / negative_sample_rate
@@ -352,37 +347,27 @@ def optimize_layout_euclidean(
 
     ghost_embeddings = np.array(
         [
-            np.array(
-                [
-                    # np.random.uniform(-10, 10, (n_ghosts_per_target, 2))
-                    np.tile(original_embeddings[i][j], (n_ghosts, 1))
-                    # + np.random.uniform(-1, 1, (n_ghosts, 2))
-                    for j in range(n_vertices)
-                ]
-            )
-            for i in range(n_embeddings)
+            # np.random.uniform(-10, 10, (n_ghosts_per_target, 2))
+            np.tile(original_embedding[j], (n_ghosts, 1))
+            # + np.random.uniform(-1, 1, (n_ghosts, 2))
+            for j in range(n_vertices)
         ],
         dtype=np.float32,
-    )  # shape (n_embeddings, n_vertices, n_ghosts_per_target, n_components)
+    )
+    # shape (n_vertices, n_ghosts, n_components)
 
-    # print(original_embeddings[0][:3])
-    # print(ghost_embeddings[0][:3])
     has_ghost = np.array([True for _ in range(n_vertices)])
     indices = np.arange(n_vertices)
 
-    if halving_points is None:
-        halving_points = []
+    if schedule is None:
+        schedule = []
 
-    start_time = time.time()
     for n in tqdm(range(n_epochs), **tqdm_kwds):
-        np.save(f"ghost_embeddings_{n}.npy", ghost_embeddings)
-        np.save(f"original_embeddings_{n}.npy", original_embeddings)
-        if n in halving_points and not n_ghosts == 0:
-            print(n)
+        if n in schedule and not n_ghosts == 0:
             # calculate the ranks of the ghosts
-            # original_embeddings: (n_embeddings, n_samples, n_components)
-            ranks, scores = detect_instable_ghosts(
-                original_embeddings,
+            # original_embeddings: (n_vertices, n_components)
+            ranks, scores = measure_instability(
+                original_embedding,
                 ghost_embeddings,
                 indices[has_ghost],
             )
@@ -393,59 +378,46 @@ def optimize_layout_euclidean(
             # update the ghost existence
             has_ghost[normal_ghosts] = False
 
-            # print("after halving")
-            # print(epoch_of_next_sample[:3])
-            # print(original_embeddings[0][:3])
-            # print(ghost_embeddings[0][:3])
+        optimize_ghost_fn(
+            ghost_embeddings,
+            original_embedding.astype(np.float32),
+            head,
+            tail,
+            has_ghost,
+            n_ghosts,
+            n_vertices,
+            epochs_per_sample,
+            a,
+            b,
+            rng_state,
+            gamma,
+            dim,
+            alpha,
+            epochs_per_negative_sample,
+            epoch_of_next_negative_sample,
+            epoch_of_next_sample,
+            n,
+        )
 
-        for i in range(n_embeddings):
-
-            # print("X", ghost_embeddings[0][:3])
-            optimize_ghost_fn(
-                ghost_embeddings[i],  # .astype(np.float32, order="C", copy=False),
-                original_embeddings[i].astype(
-                    np.float32
-                ),  # .astype(np.float32, order="C", copy=False),
-                head,
-                tail,
-                has_ghost,
-                n_ghosts,
-                n_vertices,
-                epochs_per_sample,
-                a,
-                b,
-                rng_state,
-                gamma,
-                dim,
-                alpha,
-                epochs_per_negative_sample,
-                epoch_of_next_negative_sample,
-                epoch_of_next_sample,
-                n,
-                benchmark=benchmark,
-            )
-            # print("Y", ghost_embeddings[0][:3])
-
-            optimize_real_fn(
-                original_embeddings[i],
-                original_embeddings[i],
-                head,
-                tail,
-                n_vertices,
-                epochs_per_sample,
-                a,
-                b,
-                rng_state,
-                gamma,
-                dim,
-                move_other,
-                alpha,
-                epochs_per_negative_sample,
-                epoch_of_next_negative_sample,
-                epoch_of_next_sample,
-                n,
-                update=i == n_embeddings - 1,
-            )
+        optimize_real_fn(
+            original_embedding,
+            original_embedding,
+            head,
+            tail,
+            n_vertices,
+            epochs_per_sample,
+            a,
+            b,
+            rng_state,
+            gamma,
+            dim,
+            move_other,
+            alpha,
+            epochs_per_negative_sample,
+            epoch_of_next_negative_sample,
+            epoch_of_next_sample,
+            n,
+        )
 
         alpha = initial_alpha * (1.0 - (float(n) / float(n_epochs)))
 
@@ -454,13 +426,9 @@ def optimize_layout_euclidean(
 
         # if epochs_list is not None and n in epochs_list:
         #     embedding_list.append(head_embedding.copy())
-    np.save(f"ghost_embeddings_{n_epochs}.npy", ghost_embeddings)
-    np.save(f"original_embeddings_{n_epochs}.npy", original_embeddings)
     # Add the last embedding to the list as well
     # if epochs_list is not None:
     #     embedding_list.append(head_embedding.copy())
-    end_time = time.time()
-    time_cost = end_time - start_time
     ghost_indices = np.array(range(n_vertices))[has_ghost]
 
-    return (original_embeddings, ghost_embeddings, ghost_indices, time_cost)
+    return (original_embedding, ghost_embeddings, ghost_indices)

@@ -2,7 +2,7 @@ import time
 from typing import List, Literal
 from warnings import warn
 import joblib
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, ListedColormap
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.metrics import pairwise_distances
 from sklearn.neighbors import KDTree
@@ -36,6 +36,8 @@ import numpy as np
 import numba
 import scipy.sparse
 from scipy.sparse import tril as sparse_tril, triu as sparse_triu
+
+import matplotlib.pyplot as plt
 
 from pynndescent import NNDescent
 from pynndescent.distances import named_distances as pynn_named_distances
@@ -1053,7 +1055,7 @@ class GhostUMAP(UMAP):
                 self.n_epochs_list if self.n_epochs_list is not None else self.n_epochs
             )
             (
-                self.original_embeddings,
+                self.original_embedding,
                 self.ghost_embeddings,
                 self.ghost_indices,
                 aux_data,
@@ -1151,12 +1153,12 @@ class GhostUMAP(UMAP):
 
         if schedule is None:
             return (
-                self.original_embeddings,
+                self.original_embedding,
                 self.ghost_embeddings,
             )
 
         return (
-            self.original_embeddings,
+            self.original_embedding,
             self.ghost_embeddings,
             self.ghost_indices,
         )
@@ -1177,7 +1179,78 @@ class GhostUMAP(UMAP):
 
     def measure_instability(self):
         return measure_instability(
-            self.original_embeddings,
+            self.original_embedding,
             self.ghost_embeddings,
             self.ghost_indices,
         )
+
+    def plot(
+        self,
+        ghost_idx: int = None,
+        figsize=(8, 8),
+        c=None,
+        cmap=None,
+        s=5,
+        alpha=0.5,
+        ghost_c="red",
+        ghost_alpha=0.7,
+        ghost_s=300,
+        original_s=800,
+        original_alpha=0.8,
+    ):
+        if ghost_idx not in self.ghost_indices:
+            raise ValueError("ghost_idx should be one of the ghost indices")
+
+        tableau10 = [
+            (78 / 255, 121 / 255, 167 / 255),  # blue
+            (242 / 255, 142 / 255, 43 / 255),  # orange
+            (225 / 255, 87 / 255, 89 / 255),  # red
+            (118 / 255, 183 / 255, 178 / 255),  # cyan
+            (89 / 255, 161 / 255, 79 / 255),  # green
+            (237 / 255, 201 / 255, 72 / 255),  # yellow
+            (176 / 255, 122 / 255, 161 / 255),  # purple
+            (255 / 255, 157 / 255, 167 / 255),  # pink
+            (156 / 255, 117 / 255, 95 / 255),  # brown
+            (186 / 255, 176 / 255, 172 / 255),  # grey
+        ]
+
+        tableau10_cmap = ListedColormap(tableau10)
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        ax.scatter(
+            self.original_embedding[:, 0],
+            self.original_embedding[:, 1],
+            c=tableau10[9] if c is None else c,
+            cmap=tableau10_cmap if cmap is None else cmap,
+            s=s,
+            alpha=alpha,
+        )
+
+        if ghost_idx is not None:
+            ax.scatter(
+                self.original_embedding[ghost_idx, 0],
+                self.original_embedding[ghost_idx, 1],
+                c=ghost_c,
+                s=original_s,
+                alpha=original_alpha,
+                marker="P",
+                edgecolors="black",
+                linewidths=2,
+            )
+
+            ax.scatter(
+                self.ghost_embeddings[ghost_idx, :, 0],
+                self.ghost_embeddings[ghost_idx, :, 1],
+                c=ghost_c,
+                s=ghost_s,
+                alpha=ghost_alpha,
+                marker="^",
+                edgecolors="black",
+                linewidths=2,
+            )
+
+        fig.tight_layout()
+        ax.axis("off")
+
+        return fig, ax

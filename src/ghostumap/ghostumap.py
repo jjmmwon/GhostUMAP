@@ -1198,6 +1198,51 @@ class GhostUMAP(UMAP):
         original_s=800,
         original_alpha=0.8,
     ):
+        """
+        Plot the original embedding with the ghost points.
+
+        Parameters
+        ----------
+        ghost_idx : int (optional, default None)
+            The index of the ghost point to plot. If None, only the original embedding will be plotted.
+
+        figsize : tuple (optional, default (8, 8))
+            The size of the figure.
+
+        c : array-like (optional, default None)
+            The color of the original embedding points.
+
+        cmap : str or Colormap (optional, default None)
+            The colormap of the original embedding points.
+
+        s : float (optional, default 5)
+            The size of the original embedding points.
+
+        alpha : float (optional, default 0.5)
+            The transparency of the original embedding points.
+
+        ghost_c : str (optional, default 'red')
+            The color of the ghost points.
+
+        ghost_alpha : float (optional, default 0.7)
+            The transparency of the ghost points.
+
+        ghost_s : float (optional, default 300)
+            The size of the ghost points.
+
+        original_s : float (optional, default 800)
+            The size of the original embedding points.
+
+        original_alpha : float (optional, default 0.8)
+            The transparency of the original embedding points.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure object.
+
+        ax : matplotlib.axes.Axes
+        """
         if ghost_idx not in self.ghost_indices:
             raise ValueError("ghost_idx should be one of the ghost indices")
 

@@ -1107,7 +1107,7 @@ class GhostUMAP(UMAP):
         X,
         force_all_finite=True,
         n_ghosts=8,
-        schedule: List[int] = None,
+        schedule: List[int] = [],
     ):
         """
         Fit X into an embedded space with ghosts and return that transformed outputs.
@@ -1140,7 +1140,7 @@ class GhostUMAP(UMAP):
         ghost_embedding : array, shape (n_samples, n_ghosts, n_components)
             The transformed ghost points in the embedded space.
 
-        ghost_indices : array, shape (n_remaining_ghosts,) (optional, default None)
+        ghost_indices : array, shape (n_remaining_ghosts,)
             The indices of the ghost points in the original data.
 
         """
@@ -1150,12 +1150,6 @@ class GhostUMAP(UMAP):
 
         y = None
         self.fit(X, y, force_all_finite, n_ghosts, schedule)
-
-        if schedule is None:
-            return (
-                self.original_embedding,
-                self.ghost_embeddings,
-            )
 
         return (
             self.original_embedding,
